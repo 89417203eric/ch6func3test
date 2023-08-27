@@ -1,79 +1,220 @@
-from flask import Flask, request, abort
-
-from linebot import (
-    LineBotApi, WebhookHandler
-)
-from linebot.exceptions import (
-    InvalidSignatureError
-)
-from linebot.models import *
-
-#======python的函數庫==========
-import tempfile, os
-import datetime
-import openai
-import time
-#======python的函數庫==========
-
+from flask import Flask
 app = Flask(__name__)
-static_tmp_path = os.path.join(os.path.dirname(__file__), 'static', 'tmp')
-# Channel Access Token
-line_bot_api = LineBotApi(os.getenv('CHANNEL_ACCESS_TOKEN'))
-# Channel Secret
-handler = WebhookHandler(os.getenv('CHANNEL_SECRET'))
-# OPENAI API Key初始化設定
-openai.api_key = os.getenv('OPENAI_API_KEY')
 
+from flask import request, abort
+from linebot import  LineBotApi, WebhookHandler
+from linebot.exceptions import InvalidSignatureError
+from linebot.models import MessageEvent, TextMessage, PostbackEvent, TextSendMessage, TemplateSendMessage, ConfirmTemplate, MessageTemplateAction, ButtonsTemplate, PostbackTemplateAction, URITemplateAction, CarouselTemplate, CarouselColumn, ImageCarouselTemplate, ImageCarouselColumn
+from urllib.parse import parse_qsl
 
-def GPT_response(text):
-    # 接收回應
-    response = openai.Completion.create(model="text-davinci-003", prompt=text, temperature=0.5, max_tokens=500)
-    print(response)
-    # 重組回應
-    answer = response['choices'][0]['text'].replace('。','')
-    return answer
+line_bot_api = LineBotApi('I3jkCzuqY98aXgWQnbZB8jQLbljORze0+OZHqaZU+jrjaY76DDnosNfTzJ0+sPrPJeH2riKZMnfFMRmYxGZzA4ni/QfUg1+lsSWNZ0NhKigIsOwgu4Qn52XutSY/6jDYCeuKL/ZAcFrxAhjOLDtyLgdB04t89/1O/w1cDnyilFU=')
+handler = WebhookHandler('01373126c523f07558fe032225f2a2c0')
 
-
-# 監聽所有來自 /callback 的 Post Request
 @app.route("/callback", methods=['POST'])
 def callback():
-    # get X-Line-Signature header value
     signature = request.headers['X-Line-Signature']
-    # get request body as text
     body = request.get_data(as_text=True)
-    app.logger.info("Request body: " + body)
-    # handle webhook body
     try:
         handler.handle(body, signature)
     except InvalidSignatureError:
         abort(400)
     return 'OK'
 
-
-# 處理訊息
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    msg = event.message.text
-    GPT_answer = GPT_response(msg)
-    print(GPT_answer)
-    line_bot_api.reply_message(event.reply_token, TextSendMessage(GPT_answer))
+    mtext = event.message.text
+    if mtext == '@按鈕樣板':
+        sendButton(event)
 
-@handler.add(PostbackEvent)
-def handle_message(event):
-    print(event.postback.data)
+    elif mtext == '@確認樣板':
+        sendConfirm(event)
 
+    elif mtext == '@轉盤樣板':
+        sendCarousel(event)
 
-@handler.add(MemberJoinedEvent)
-def welcome(event):
-    uid = event.joined.members[0].user_id
-    gid = event.source.group_id
-    profile = line_bot_api.get_group_member_profile(gid, uid)
-    name = profile.display_name
-    message = TextSendMessage(text=f'{name}歡迎加入')
-    line_bot_api.reply_message(event.reply_token, message)
-        
-        
-import os
-if __name__ == "__main__":
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
+    elif mtext == '@圖片轉盤':
+        sendImgCarousel(event)
+
+    elif mtext == '@購買披薩':
+        sendPizza(event)
+
+    elif mtext == '@yes':
+        sendYes(event)
+
+@handler.add(PostbackEvent)  #PostbackTemplateAction觸發此事件
+def handle_postback(event):
+    backdata = dict(parse_qsl(event.postback.data))  #取得Postback資料
+    if backdata.get('action') == 'buy':
+        sendBack_buy(event, backdata)
+    elif backdata.get('action') == 'sell':
+        sendBack_sell(event, backdata)
+
+def sendButton(event):  #按鈕樣版
+    try:
+        message = TemplateSendMessage(
+            alt_text='按鈕樣板',
+            template=ButtonsTemplate(
+                thumbnail_image_url='https://i.imgur.com/4QfKuz1.png',  #顯示的圖片
+                title='按鈕樣版示範',  #主標題
+                text='請選擇：',  #副標題
+                actions=[
+                    MessageTemplateAction(  #顯示文字計息
+                        label='文字訊息',
+                        text='@購買披薩'
+                    ),
+                    URITemplateAction(  #開啟網頁
+                        label='連結網頁',
+                        uri='http://www.e-happy.com.tw'
+                    ),
+                    PostbackTemplateAction(  #執行Postback功能,觸發Postback事件
+                        label='回傳訊息',  #按鈕文字
+                        #text='@購買披薩',  #顯示文字訊息
+                        data='action=buy'  #Postback資料
+                    ),
+                ]
+            )
+        )
+        line_bot_api.reply_message(event.reply_token, message)
+    except:
+        line_bot_api.reply_message(event.reply_token,TextSendMessage(text='發生錯誤！'))
+
+def sendConfirm(event):  #確認樣板
+    try:
+        message = TemplateSendMessage(
+            alt_text='確認樣板',
+            template=ConfirmTemplate(
+                text='你確定要購買這項商品嗎？',
+                actions=[
+                    MessageTemplateAction(  #按鈕選項
+                        label='是',
+                        text='@yes'
+                    ),
+                    MessageTemplateAction(
+                        label='否',
+                        text='@no'
+                    )
+                ]
+            )
+        )
+        line_bot_api.reply_message(event.reply_token, message)
+    except:
+        line_bot_api.reply_message(event.reply_token,TextSendMessage(text='發生錯誤！'))
+
+def sendCarousel(event):  #轉盤樣板
+    try:
+        message = TemplateSendMessage(
+            alt_text='轉盤樣板',
+            template=CarouselTemplate(
+                columns=[
+                    CarouselColumn(
+                        thumbnail_image_url='https://i.imgur.com/4QfKuz1.png',
+                        title='這是樣板一',
+                        text='第一個轉盤樣板',
+                        actions=[
+                            MessageTemplateAction(
+                                label='文字訊息一',
+                                text='賣披薩'
+                            ),
+                            URITemplateAction(
+                                label='連結文淵閣網頁',
+                                uri='http://www.e-happy.com.tw'
+                            ),
+                            PostbackTemplateAction(
+                                label='回傳訊息一',
+                                data='action=sell&item=披薩'
+                            ),
+                        ]
+                    ),
+                    CarouselColumn(
+                        thumbnail_image_url='https://i.imgur.com/qaAdBkR.png',
+                        title='這是樣板二',
+                        text='第二個轉盤樣板',
+                        actions=[
+                            MessageTemplateAction(
+                                label='文字訊息二',
+                                text='賣飲料'
+                            ),
+                            URITemplateAction(
+                                label='連結台大網頁',
+                                uri='http://www.ntu.edu.tw'
+                            ),
+                            PostbackTemplateAction(
+                                label='回傳訊息二',
+                                data='action=sell&item=飲料'
+                            ),
+                        ]
+                    )
+                ]
+            )
+        )
+        line_bot_api.reply_message(event.reply_token,message)
+    except:
+        line_bot_api.reply_message(event.reply_token,TextSendMessage(text='發生錯誤！'))
+
+def sendImgCarousel(event):  #圖片轉盤
+    try:
+        message = TemplateSendMessage(
+            alt_text='圖片轉盤樣板',
+            template=ImageCarouselTemplate(
+                columns=[
+                    ImageCarouselColumn(
+                        image_url='https://i.imgur.com/4QfKuz1.png',
+                        action=MessageTemplateAction(
+                            label='文字訊息',
+                            text='賣披薩'
+                        )
+                    ),
+                    ImageCarouselColumn(
+                        image_url='https://i.imgur.com/qaAdBkR.png',
+                        action=PostbackTemplateAction(
+                            label='回傳訊息',
+                            data='action=sell&item=飲料'
+                        )
+                    )
+                ]
+            )
+        )
+        line_bot_api.reply_message(event.reply_token,message)
+    except:
+        line_bot_api.reply_message(event.reply_token,TextSendMessage(text='發生錯誤！'))
+
+def sendPizza(event):
+    try:
+        message = TextSendMessage(
+            text = '感謝您購買披薩，我們將盡快為您製作。'
+        )
+        line_bot_api.reply_message(event.reply_token, message)
+    except:
+        line_bot_api.reply_message(event.reply_token,TextSendMessage(text='發生錯誤！'))
+
+def sendYes(event):
+    try:
+        message = TextSendMessage(
+            text='感謝您的購買，\n我們將盡快寄出商品。',
+        )
+        line_bot_api.reply_message(event.reply_token, message)
+    except:
+        line_bot_api.reply_message(event.reply_token,TextSendMessage(text='發生錯誤！'))
+
+def sendBack_buy(event, backdata):  #處理Postback
+    try:
+        text1 = '感謝您購買披薩，我們將盡快為您製作。\n(action 的值為 ' + backdata.get('action') + ')'
+        text1 += '\n(可將處理程式寫在此處。)'
+        message = TextSendMessage(  #傳送文字
+            text = text1
+        )
+        line_bot_api.reply_message(event.reply_token, message)
+    except:
+        line_bot_api.reply_message(event.reply_token,TextSendMessage(text='發生錯誤！'))
+
+def sendBack_sell(event, backdata):  #處理Postback
+    try:
+        message = TextSendMessage(  #傳送文字
+            text = '點選的是賣 ' + backdata.get('item')
+        )
+        line_bot_api.reply_message(event.reply_token, message)
+    except:
+        line_bot_api.reply_message(event.reply_token,TextSendMessage(text='發生錯誤！'))
+
+if __name__ == '__main__':
+    app.run()
